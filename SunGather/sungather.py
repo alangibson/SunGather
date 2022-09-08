@@ -3,17 +3,18 @@
 from SungrowModbusTcpClient import SungrowModbusTcpClient
 from SungrowModbusWebClient import SungrowModbusWebClient
 from pymodbus.client.sync import ModbusTcpClient
-from version import __version__
+from .version import __version__
 from datetime import datetime
 
 import importlib
 import logging
-import logging.handlers
 import sys
 import getopt
 import yaml
 import time
 import os
+
+logger = logging.getLogger(__name__)
 
 class SungrowInverter():
     def __init__(self, config_inverter):
@@ -33,20 +34,20 @@ class SungrowInverter():
             "connection":       config_inverter.get('connection')
         }
         self.client = None
-        
         self.registers = [[]]
         self.registers.pop() # Remove null value from list
         self.registers_custom = [{'name': 'export_to_grid', 'unit': 'W', 'address': 'vr001'}, {'name': 'import_from_grid', 'unit': 'W', 'address': 'vr002'}, {'name': 'run_state', 'address': 'vr003'}, {'name': 'timestamp', 'address': 'vr004'}]
         self.register_ranges = [[]]
         self.register_ranges.pop() # Remove null value from list
-
         self.latest_scrape = {}
 
     def connect(self):
+        
         if self.client:
-            try: self.client.connect()
-            except: return False
-            return True
+            try: 
+                return self.client.connect()
+            except: 
+                return False
 
         if self.inverter_config['connection'] == "http":
             self.client_config['port'] = '8082'
@@ -56,36 +57,35 @@ class SungrowInverter():
         elif self.inverter_config['connection'] == "modbus":
             self.client = ModbusTcpClient(**self.client_config)
         else:
-            logging.warning(f"Inverter: Unknown connection type {self.inverter_config['connection']}, Valid options are http, sungrow or modbus")
+            logger.warning(f"Inverter: Unknown connection type {self.inverter_config['connection']}, Valid options are http, sungrow or modbus")
             return False
-        logging.info("Connection: " + str(self.client))
+        logger.info("Connection: " + str(self.client))
 
-        try: self.client.connect()
-        except: return False
-
-        time.sleep(3)       # Wait 3 seconds, fixes timing issues
-        return True
+        try: 
+            return self.client.connect()
+        except: 
+            return False
 
     def checkConnection(self):
-        logging.debug("Checking Modbus Connection")
+        logger.debug("Checking Modbus Connection")
         if self.client:
             if self.client.is_socket_open():
-                logging.debug("Modbus, Session is still connected")
+                logger.debug("Modbus, Session is still connected")
                 return True
             else:
-                logging.info(f'Modbus, Connecting new session')
+                logger.info(f'Modbus, Connecting new session')
                 return self.connect()
         else:
-            logging.info(f'Modbus client is not connected, attempting to reconnect')
+            logger.info(f'Modbus client is not connected, attempting to reconnect')
             return self.connect()
 
     def close(self):
-        logging.info("Closing Session: " + str(self.client))
+        logger.info("Closing Session: " + str(self.client))
         try: self.client.close()
         except: pass
 
     def disconnect(self):
-        logging.info("Disconnecting: " + str(self.client))
+        logger.info("Disconnecting: " + str(self.client))
         try: self.client.close()
         except: pass
         self.client = None
@@ -93,21 +93,25 @@ class SungrowInverter():
     def configure_registers(self,registersfile):
         # Check model so we can load only valid registers
         if self.inverter_config.get('model'):
-            logging.info(f"Bypassing Model Detection, Using config: {self.inverter_config.get('model')}")
+            logger.info(f"Bypassing Model Detection, Using config: {self.inverter_config.get('model')}")
         else:
             # Load just the register to detect model, then we can load the rest of registers based on returned model
             for register in registersfile['registers'][0]['read']:
                 if register.get('name') == "device_type_code":
+                    logger.debug('Trying to getting model from device_type_code register')
                     register['type'] = "read"
                     self.registers.append(register)
+                    register_type = register['type']
+                    register_address = register['address'] - 1
+                    logger.debug(f'device_type_code request {register_type} {register_address}')
                     if self.load_registers(register['type'], register['address'] -1, 1): # Needs to be address -1
                         if isinstance(self.latest_scrape.get('device_type_code'),int):
-                            logging.warning(f"Unknown Type Code Detected: {self.latest_scrape.get('device_type_code')}")
+                            logger.warning(f"Unknown Type Code Detected: {self.latest_scrape.get('device_type_code')}")
                         else:
                             self.inverter_config['model'] = self.latest_scrape.get('device_type_code')
-                            logging.info(f"Detected Model: {self.inverter_config.get('model')}")
+                            logger.info(f"Detected Model: {self.inverter_config.get('model')}")
                     else:
-                        logging.info(f'Model detection failed, please set model in config.py')
+                        logger.info(f'Model detection failed, please set model in config.py')
                     self.registers.pop()
                     break
 
@@ -169,7 +173,7 @@ class SungrowInverter():
 
     def load_registers(self, register_type, start, count=100):
         try:
-            logging.debug(f'load_registers: {register_type}, {start}:{count}')
+            logger.debug(f'load_registers: {register_type}, {start}:{count}')
             if register_type == "read":
                 rr = self.client.read_input_registers(start,count=count, unit=self.inverter_config['slave'])
             elif register_type == "hold":
@@ -177,21 +181,21 @@ class SungrowInverter():
             else:
                 raise RuntimeError(f"Unsupported register type: {type}")
         except Exception as err:
-            logging.warning(f"No data returned for {register_type}, {start}:{count}")
-            logging.debug(f"{str(err)}')")
+            logger.warning(f"No data returned for {register_type}, {start}:{count}")
+            logger.debug(f"{str(err)}')")
             return False
 
         if rr.isError():
-            logging.warning(f"Modbus connection failed")
-            logging.debug(f"{rr}")
+            logger.warning(f"Modbus connection failed")
+            logger.debug(f"{rr}")
             return False
 
         if not hasattr(rr, 'registers'):
-            logging.warning("No registers returned")
+            logger.warning("No registers returned")
             return False
 
         if len(rr.registers) != count:
-            logging.warning(f"Mismatched number of registers read {len(rr.registers)} != {count}")
+            logger.warning(f"Mismatched number of registers read {len(rr.registers)} != {count}")
             return False
 
         for num in range(0, count):
@@ -309,16 +313,16 @@ class SungrowInverter():
 
         for range in self.register_ranges:
             load_registers_count +=1
-            logging.debug(f'Scraping: {range.get("type")}, {range.get("start")}:{range.get("range")}')
+            logger.debug(f'Scraping: {range.get("type")}, {range.get("start")}:{range.get("range")}')
             if not self.load_registers(range.get('type'), int(range.get('start')), int(range.get('range'))):
                 load_registers_failed +=1
         if load_registers_failed == load_registers_count:
             # If every scrape fails, disconnect the client
-            logging.warning
+            logger.warning('All scrapes failed. Disconnecting client.')
             self.disconnect()
             return False
         if load_registers_failed > 0:
-            logging.info(f'Scraping: {load_registers_failed}/{load_registers_count} registers failed to scrape')
+            logger.info(f'Scraping: {load_registers_failed}/{load_registers_count} registers failed to scrape')
 
         # Leave connection open, see if helps resolve the connection issues
         #self.close()
@@ -349,11 +353,17 @@ class SungrowInverter():
                 except Exception:
                     pass
         
-        try: # If inverter is returning no data for load_power, we can calculate it manually
-            if not self.latest_scrape["load_power"]:
-                self.latest_scrape["load_power"] = int(self.latest_scrape.get('total_active_power')) + int(self.latest_scrape.get('meter_power'))
-        except Exception:
-            pass  
+        # Alan removed
+        # TODO this is wrong (?). Load should not be total power. 'load' means power consumed.
+        # try: # If inverter is returning no data for load_power, we can calculate it manually
+        #     if not self.latest_scrape["load_power"]:
+        #         self.latest_scrape["load_power"] = int(self.latest_scrape.get('total_active_power')) + int(self.latest_scrape.get('meter_power'))
+        # except Exception:
+        #     pass  
+    
+        # Alan: Make load_power an alias for load_power_hybrid if load_power not set
+        if not self.latest_scrape["load_power"] and self.latest_scrape["load_power_hybrid"]:
+            self.latest_scrape["load_power"] = self.latest_scrape["load_power_hybrid"]
 
         # See if the inverter is running, This is added to inverters so can be read via MQTT etc...
         # It is also used below, as some registers hold the last value on 'stop' so we need to set to 0
@@ -371,7 +381,7 @@ class SungrowInverter():
 
         if self.inverter_config.get('use_local_time',False):
             self.latest_scrape["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            logging.debug(f'Using Local Computer Time: {self.latest_scrape.get("timestamp")}')       
+            logger.debug(f'Using Local Computer Time: {self.latest_scrape.get("timestamp")}')       
             del self.latest_scrape["year"]
             del self.latest_scrape["month"]
             del self.latest_scrape["day"]
@@ -388,7 +398,7 @@ class SungrowInverter():
                     self.latest_scrape["minute"],
                     self.latest_scrape["second"],
                 )
-                logging.debug(f'Using Inverter Time: {self.latest_scrape.get("timestamp")}')       
+                logger.debug(f'Using Inverter Time: {self.latest_scrape.get("timestamp")}')       
                 del self.latest_scrape["year"]
                 del self.latest_scrape["month"]
                 del self.latest_scrape["day"]
@@ -419,18 +429,18 @@ class SungrowInverter():
             pass
 
         scrape_end = datetime.now()
-        logging.info(f'Inverter: Successfully scraped in {(scrape_end - scrape_start).seconds}.{(scrape_end - scrape_start).microseconds} secs')
+        logger.info(f'Inverter: Successfully scraped in {(scrape_end - scrape_start).seconds}.{(scrape_end - scrape_start).microseconds} secs')
 
         return True
 
-def main():
-    configfilename = 'config.yaml'
+
+def config(configfilename):
     logfolder = ''
 
     try:
         opts, args = getopt.getopt(sys.argv[1:],"hc:l:v:", "runonce")
     except getopt.GetoptError:
-        logging.debug(f'No options passed via command line')
+        logger.debug(f'No options passed via command line')
 
     for opt, arg in opts:
         if opt == '-h':
@@ -456,32 +466,33 @@ def main():
                 if int(arg) >= 0 and int(arg) <= 50:
                     loglevel = int(arg)
                 else:
-                    logging.error(f"Valid verbose options: 10 = Debug, 20 = Info, 30 = Warning (default), 40 = Error")
+                    logger.error(f"Valid verbose options: 10 = Debug, 20 = Info, 30 = Warning (default), 40 = Error")
                     sys.exit(2)        
             else:
-                logging.error(f"Valid verbose options: 10 = Debug, 20 = Info, 30 = Warning (default), 40 = Error")
+                logger.error(f"Valid verbose options: 10 = Debug, 20 = Info, 30 = Warning (default), 40 = Error")
                 sys.exit(2) 
-        elif opt == '--runonce':
-            runonce = True
+        # TODO reenable runonce
+        # elif opt == '--runonce':
+        #     runonce = True
 
-    logging.info(f'Starting SunGather {__version__}')
+    logger.info(f'Starting SunGather {__version__}')
 
     try:
         configfile = yaml.safe_load(open(configfilename, encoding="utf-8"))
-        logging.info(f"Loaded config: {configfilename}")
+        logger.info(f"Loaded config: {configfilename}")
     except Exception as err:
-        logging.error(f"Failed: Loading config: {configfilename} \n\t\t\t     {err}")
+        logger.error(f"Failed: Loading config: {configfilename} \n\t\t\t     {err}")
         sys.exit(1)
     if not configfile.get('inverter'):
-        logging.error(f"Failed Loading config, missing Inverter settings")
+        logger.error(f"Failed Loading config, missing Inverter settings")
         sys.exit(f"Failed Loading config, missing Inverter settings")   
 
     try:
         registersfile = yaml.safe_load(open('registers-sungrow.yaml', encoding="utf-8"))
-        logging.info(f"Loaded registers: {os.getcwd()}/registers-sungrow.yaml")
-        logging.info(f"Registers file version: {registersfile.get('version','UNKNOWN')}")
+        logger.info(f"Loaded registers: {os.getcwd()}/registers-sungrow.yaml")
+        logger.info(f"Registers file version: {registersfile.get('version','UNKNOWN')}")
     except Exception as err:
-        logging.error(f"Failed: Loading registers: {os.getcwd()}/registers-sungrow.yaml {err}")
+        logger.error(f"Failed: Loading registers: {os.getcwd()}/registers-sungrow.yaml {err}")
         sys.exit(f"Failed: Loading registers: {os.getcwd()}/registers-sungrow.yaml {err}")
    
     config_inverter = {
@@ -508,32 +519,44 @@ def main():
     if not config_inverter['log_file'] == "OFF":
         if config_inverter['log_file'] == "DEBUG" or config_inverter['log_file'] == "INFO" or config_inverter['log_file'] == "WARNING" or config_inverter['log_file'] == "ERROR":
             logfile = logfolder + "SunGather.log"
-            fh = logging.handlers.RotatingFileHandler(logfile, mode='w', encoding='utf-8', maxBytes=10485760, backupCount=10) # Log 10mb files, 10 x files = 100mb
+            fh = logger.handlers.RotatingFileHandler(logfile, mode='w', encoding='utf-8', maxBytes=10485760, backupCount=10) # Log 10mb files, 10 x files = 100mb
             fh.formatter = logger.handlers[0].formatter
             fh.setLevel(config_inverter['log_file'])
             logger.addHandler(fh)
         else:
-            logging.warning(f"log_file: Valid options are: DEBUG, INFO, WARNING, ERROR and OFF")
+            logger.warning(f"log_file: Valid options are: DEBUG, INFO, WARNING, ERROR and OFF")
 
-    logging.info(f"Logging to console set to: {logging.getLevelName(logger.handlers[0].level)}")
+    logger.info(f"Logging to console set to: {logger.getLevelName(logger.handlers[0].level)}")
     if logger.handlers.__len__() == 3:
-        logging.info(f"Logging to file set to: {logging.getLevelName(logger.handlers[2].level)}")
+        logger.info(f"Logging to file set to: {logger.getLevelName(logger.handlers[2].level)}")
     
-    logging.debug(f'Inverter Config Loaded: {config_inverter}')    
+    logger.debug(f'Inverter Config Loaded: {config_inverter}')    
 
+    return (config_inverter, configfile, registersfile)
+
+
+def construct(config_inverter, registersfile) -> SungrowInverter:
     if config_inverter.get('host'):
         inverter = SungrowInverter(config_inverter)
     else:
-        logging.error(f"Error: host option in config is required")
-        sys.exit("Error: host option in config is required")
+        logger.error(f"Error: host option in config is required")
+        # FIXME Alan removed
+        # sys.exit("Error: host option in config is required")
 
+    logger.info(f"Validating connection to: {config_inverter.get('host')}:{config_inverter.get('port')}")
     if not inverter.checkConnection():
-        logging.error(f"Error: Connection to inverter failed: {config_inverter.get('host')}:{config_inverter.get('port')}")
-        sys.exit(f"Error: Connection to inverter failed: {config_inverter.get('host')}:{config_inverter.get('port')}")       
+        logger.error(f"Error: Connection to inverter failed: {config_inverter.get('host')}:{config_inverter.get('port')}")
+        # FIXME Alan removed
+        # sys.exit(f"Error: Connection to inverter failed: {config_inverter.get('host')}:{config_inverter.get('port')}")       
 
+    logger.debug(f"Configuring registers")
     inverter.configure_registers(registersfile)
     if not inverter.inverter_config['connection'] == "http": inverter.close()
-    
+
+    return inverter
+
+
+def targets(configfile, inverter):
     # Now we know the inverter is working, lets load the exports
     exports = []
     if configfile.get('exports'):
@@ -541,58 +564,68 @@ def main():
             try:
                 if export.get('enabled', False):
                     export_load = importlib.import_module("exports." + export.get('name'))
-                    logging.info(f"Loading Export: exports\{export.get('name')}")
+                    logger.info(f"Loading Export: exports\{export.get('name')}")
                     exports.append(getattr(export_load, "export_" + export.get('name'))())
                     retval = exports[-1].configure(export, inverter)
             except Exception as err:
-                logging.error(f"Failed loading export: {err}" +
+                logger.error(f"Failed loading export: {err}" +
                             f"\n\t\t\t     Please make sure {export.get('name')}.py exists in the exports folder")
+                        
+    return (exports, retval)
+
+
+def poll(inverter: SungrowInverter, exports):
+    loop_start = datetime.now()
+
+    inverter.checkConnection()
+
+    # Scrape the inverter
+    success = inverter.scrape()
+
+    if success:
+        for export in exports:
+            export.publish(inverter)
+        if not inverter.inverter_config['connection'] == "http": inverter.close()
+    else:
+        inverter.disconnect()
+        logger.warning(f"Data collection failed, skipped exporting data.")
+
+    loop_end = datetime.now()
+    process_time = round(float(((loop_end - loop_start).seconds) + ((loop_end - loop_start).microseconds / 1000000)),2)
+    logger.debug(f'Processing Time: {process_time} secs')
+
+    return process_time
+
+
+def main():
+
+    config_inverter, configfile, registersfile, runonce = config('config.yaml')
+
+    inverter = construct(config_inverter, registersfile)
+
+    exports, retval = targets(configfile, inverter)
 
     scan_interval = config_inverter.get('scan_interval')
 
     # Core polling loop
     while True:
-        loop_start = datetime.now()
-
-        inverter.checkConnection()
-
-        # Scrape the inverter
-        success = inverter.scrape()
-
-        if(success):
-            for export in exports:
-                export.publish(inverter)
-            if not inverter.inverter_config['connection'] == "http": inverter.close()
-        else:
-            inverter.disconnect()
-            logging.warning(f"Data collection failed, skipped exporting data. Retying in {scan_interval} secs")
-
-        loop_end = datetime.now()
-        process_time = round(float(((loop_end - loop_start).seconds) + ((loop_end - loop_start).microseconds / 1000000)),2)
-        logging.debug(f'Processing Time: {process_time} secs')
+        process_time = poll(inverter, exports)
 
         if 'runonce' in locals():
             sys.exit(0)
-        
+
         # Sleep until the next scan
         if scan_interval - process_time <= 1:
-            logging.warning(f"SunGather is taking {process_time} to process, which is longer than interval {scan_interval}, Please increase scan interval")
+            logger.warning(f"SunGather is taking {process_time} to process, which is longer than interval {scan_interval}, Please increase scan interval")
             time.sleep(process_time)
         else:
-            logging.info(f'Next scrape in {int(scan_interval - process_time)} secs')
+            logger.info(f'Next scrape in {int(scan_interval - process_time)} secs')
             time.sleep(scan_interval - process_time)    
 
-logging.basicConfig(
-    format='%(asctime)s %(levelname)-8s %(message)s',
-    level=logging.DEBUG,
-    datefmt='%Y-%m-%d %H:%M:%S')
-
-logger = logging.getLogger('')
-ch = logging.StreamHandler()
-ch.setLevel(logging.WARNING)
-logger.addHandler(ch)
 
 if __name__== "__main__":
+    logger.basicConfig(
+        format='%(asctime)s %(levelname)-8s %(message)s',
+        level=logger.DEBUG,
+        datefmt='%Y-%m-%d %H:%M:%S')
     main()
-
-sys.exit()
