@@ -369,18 +369,15 @@ class SungrowInverter():
                 except Exception:
                     pass
 
-        # Alan removed
-        # TODO this is wrong (?). Load should not be total power. 'load' means power consumed.
-        # try:  # If inverter is returning no data for load_power, we can calculate it manually
-        #     if not self.latest_scrape["load_power"]:
-        #         self.latest_scrape["load_power"] = int(self.latest_scrape.get(
-        #             'total_active_power')) + int(self.latest_scrape.get('meter_power'))
-        # except Exception:
-        #     pass
-
-        # Alan: Make load_power an alias for load_power_hybrid if load_power not set
-        if not self.latest_scrape.get("load_power") and self.latest_scrape.get("load_power_hybrid"):
-            self.latest_scrape["load_power"] = self.latest_scrape["load_power_hybrid"]
+        try:  # If inverter is returning no data for load_power, we can calculate it manually
+            if not self.latest_scrape["load_power"]:
+                self.latest_scrape["load_power"] = int(self.latest_scrape.get(
+                    'total_active_power')) + int(self.latest_scrape.get('meter_power'))
+        except Exception:
+            # Alan added hybrid inverter support
+            # Support hybrid inverters
+            if self.latest_scrape.get("load_power_hybrid"):
+                self.latest_scrape["load_power"] = self.latest_scrape["load_power_hybrid"]
 
         # See if the inverter is running, This is added to inverters so can be read via MQTT etc...
         # It is also used below, as some registers hold the last value on 'stop' so we need to set to 0
