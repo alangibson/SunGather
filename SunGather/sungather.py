@@ -10,7 +10,7 @@ import yaml
 import time
 import os
 from version import __version__
-from .inverter import SungrowInverter
+from inverter import SungrowInverter
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +106,9 @@ def main(delay_after_connect=3):
         else:
             logger.warning(f"log_file: Valid options are: DEBUG, INFO, WARNING, ERROR and OFF")
 
-    logger.info(f"Logging to console set to: {logger.getLevelName(logger.handlers[0].level)}")
+    logger.info(f"Logging to console set to: {logging.getLevelName(logger.handlers[0].level)}")
     if logger.handlers.__len__() == 3:
-        logger.info(f"Logging to file set to: {logger.getLevelName(logger.handlers[2].level)}")
+        logger.info(f"Logging to file set to: {logging.getLevelName(logger.handlers[2].level)}")
     
     logger.debug(f'Inverter Config Loaded: {config_inverter}')    
 
@@ -181,10 +181,10 @@ def main(delay_after_connect=3):
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
-    level=logger.DEBUG,
+    level=logging.DEBUG,
     datefmt='%Y-%m-%d %H:%M:%S')
 
-logger = logging.getLogger('')
+logger = logging.getLogger(__name__)
 ch = logging.StreamHandler()
 ch.setLevel(logging.WARNING)
 logger.addHandler(ch)

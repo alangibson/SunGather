@@ -37,12 +37,12 @@ class SungrowInverter():
 
     def connect(self):
 
+        # Alan: changed to return client return value
         if self.client:
             try:
-                self.client.connect()
+                return self.client.connect()
             except:
                 return False
-            return True
 
         if self.inverter_config['connection'] == "http":
             self.client_config['port'] = '8082'
@@ -59,12 +59,11 @@ class SungrowInverter():
             return False
         logger.info("Connection: " + str(self.client))
 
+        # Alan: changed to return actual client return value
         try:
-            self.client.connect()
+            return self.client.connect()
         except:
             return False
-
-        return True
 
     def checkConnection(self):
         logger.debug("Checking Modbus Connection")
@@ -380,7 +379,7 @@ class SungrowInverter():
         #     pass
 
         # Alan: Make load_power an alias for load_power_hybrid if load_power not set
-        if not self.latest_scrape["load_power"] and self.latest_scrape["load_power_hybrid"]:
+        if not self.latest_scrape.get("load_power") and self.latest_scrape.get("load_power_hybrid"):
             self.latest_scrape["load_power"] = self.latest_scrape["load_power_hybrid"]
 
         # See if the inverter is running, This is added to inverters so can be read via MQTT etc...
