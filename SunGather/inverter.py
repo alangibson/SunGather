@@ -259,6 +259,7 @@ class SungrowInverter():
 
                     # Set the final register value with adjustments above included
                     self.latest_scrape[register_name] = register_value
+
         return True
 
     def validateRegister(self, check_register):
@@ -317,13 +318,16 @@ class SungrowInverter():
             run_state = self.latest_scrape.get("run_state")
         else:
             run_state = "ON"
-        self.latest_scrape = {}
+        
+        # Alan: Removed because it is not threadsafe
+        # self.latest_scrape = {}
+
         self.latest_scrape['device_type_code'] = self.inverter_config['model']
         self.latest_scrape["run_state"] = run_state
 
+        # Load all registers from inverer
         load_registers_count = 0
         load_registers_failed = 0
-
         for range in self.register_ranges:
             load_registers_count += 1
             logger.debug(
@@ -346,7 +350,6 @@ class SungrowInverter():
         if self.inverter_config['level'] >= 1:
             self.latest_scrape["export_to_grid"] = 0
             self.latest_scrape["import_from_grid"] = 0
-
             if self.validateRegister('meter_power'):
                 try:
                     power = self.latest_scrape.get(
